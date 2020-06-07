@@ -1,0 +1,626 @@
+---
+title: "Stephen Curry Statistics"
+output: html_document
+---
+
+```{r, message=F, echo=F,warning=FALSE}
+require(tidyr)
+require(dplyr)
+require(stringr)
+require(readr)
+require(lubridate)
+require(readr)
+require(janitor)
+require(kableExtra)
+require(purrr)
+require(readxl)
+require(lazyeval)
+require(ggplot2)
+require(broom)
+require(plotly)
+all_data <- read_excel("All Data Long.xlsx") %>% 
+  clean_names()
+comps <- "Comps.xlsx" %>% 
+  excel_sheets() %>% 
+  map(~read_excel(path = "Comps.xlsx", sheet = .)) 
+for(i in 1:6){
+  comps[[i]] <- comps[[i]] %>% 
+    select(-1) %>% 
+    mutate(scenario = excel_sheets("Comps.xlsx")[i])
+}
+comps <- bind_rows(comps) %>% 
+  clean_names()
+
+teams <- comps %>% 
+  distinct(opp) %>% 
+  arrange(opp)
+```
+
+# {.tabset}
+## Home Game and Away Analysis {.tabset}
+### Comparison of Overall Statistics
+```{r,message=F, echo=F,warning=FALSE}
+format <- function(game_var, value_var){
+  filter_criteria = interp(~!is.na(x), x = as.name(value_var))
+  temp <- comps %>% 
+    filter_(filter_criteria) %>% 
+    distinct_(~statistic, interp(~x, x = as.name(game_var)), 
+              interp(~x, x = as.name(value_var)), ~sum_stat) %>% 
+  arrange(statistic) %>% 
+  spread(key = sum_stat, value = as.name(value_var)) %>% 
+  mutate(mean_std =ifelse(str_detect(pattern = "%", statistic),
+                    paste0(round(mean*100, 2), "%"),
+                    paste0(round(mean, 2)," (", round(std, 2),")")),
+         med = ifelse(str_detect(pattern = "%", statistic),
+                              paste0(base::format(median*100,nsmall = 2),"%"),
+                                        round(median,2)),
+         max = ifelse(str_detect(pattern = "%", statistic),
+                                        paste0(base::format(max*100,nsmall = 2),"%"),
+                                        round(max,2)),
+         min = ifelse(str_detect(pattern = "%", statistic),
+                                        paste0(base::format(min*100,nsmall = 2),"%"),
+                                        round(min,2))) %>%
+  select(-std)
+  return(temp)
+}
+home_stats <- format(game_var = "n_games_home", value_var = "value_home")
+away_stats <- format(game_var = "n_games_away", value_var = "value_away")
+all_stats <- format(game_var = "n_games_all", value_var = "value_all")
+
+stats <- all_stats %>%  
+  left_join(home_stats, by = "statistic",suffix = c("", "_h")) %>% 
+  left_join(away_stats, by = "statistic",suffix = c("", "_a")) %>% 
+  select(statistic, contains("n_games"),contains("mean_std"),contains("mean"), contains("std"), contains("med"),
+         contains("min"), contains("max")) %>%
+  mutate(order = case_when(statistic == "+/-" ~1,
+                           str_detect(pattern = "PT", statistic) ~ 2,
+                           str_detect(pattern = "3P%", statistic) ~ 3.1,
+                           str_detect(pattern = "3P", statistic) ~ 3,
+                           str_detect(pattern = "FG%", statistic) ~ 4.1,
+                           str_detect(pattern = "FG", statistic) ~ 4,
+                           str_detect(pattern = "FT%", statistic) ~ 5.1,
+                           str_detect(pattern = "FT", statistic) ~ 5,
+                           statistic == "AST" ~6,
+                           statistic == "ORB" ~ 7,
+                           statistic == "TOV" ~7.1,
+                           statistic == "BLK" ~8,
+                           statistic == "STL" ~9,
+                           TRUE  ~ 10)) %>% 
+  arrange(order, statistic) %>% 
+  mutate(mean_std_h =cell_spec(mean_std_h, format = "html", color = ifelse(mean_h < mean, "red", "green")),
+         mean_std_a =cell_spec(mean_std_a, format = "html", 
+                               color = ifelse(mean_a < mean, "red", "green")),
+         statistic = cell_spec(statistic, format = "html",bold = T),
+         med_h =cell_spec(med_h, format = "html", color = 
+                            ifelse(median_h < median |(statistic == "TOV" & median_h >= median), 
+                                                                 "red", "green")),
+         med_a =cell_spec(med_a, format = "html", color = 
+                            ifelse(median_a < median|(statistic == "TOV" & median_a >= median), 
+                                                                 "red", "green")),
+         mean_std = cell_spec(mean_std, italic = T),
+         med = cell_spec(med,italic = T)) %>% 
+  select(-mean, -mean_h, -mean_a, -contains("median"),-contains("min"),-contains("max"),-order)
+
+kable(stats, format = "html",align = "c", escape = F,
+      col.names = c("Metric", rep(c("Overall", "Home", "Away"), 3))) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover")) %>% 
+  add_header_above(header = c("", "Number of Games" = 3, "Mean (SD)/Percentage" = 3, "Median" = 3)) %>% 
+  pack_rows(group_label = "Plus-Minus", start_row = 1, 1) %>% 
+  pack_rows(group_label = "Scoring", start_row = 2, 11) %>% 
+  pack_rows(group_label = "Other Offense", start_row = 12, 14) %>% 
+  pack_rows(group_label = "Defense", start_row = 15, 18) %>% 
+  scroll_box(width = "700px", height = "500px") 
+```
+
+<b>Notes:</b><br>
+[1] Note that field goal, free throw, and three point percentage statistics are calculated out of all games that Steph attempted at least one of that type of shot. All other statistics are measured out of all the total number of games that Steph has played over his career.<br>
+[2] Green denotes metrics that Steph rates higher in home or away games than his typical career performance, and red denotes metrics that Steph rates lower in.<br>
+
+### Teamwise Comparison
+#### Choose a Team: {.tabset .tabset-dropdown}
+##### Atlanta Hawks
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+format_tm <- function(team){
+  temp <- comps %>% 
+    filter(opp == teams$opp[i]) %>% 
+    distinct(statistic, sum_stat, value, n_games, location) %>% 
+  arrange(statistic, sum_stat, location) 
+  temp_h <- temp %>% 
+    filter(location == "Home") %>% 
+    spread(sum_stat, value) %>% 
+    mutate(mean_std =ifelse(str_detect(pattern = "%", statistic),
+                    paste0(round(mean*100, 2), "%"),
+                    paste0(round(mean, 2)," (", round(std, 2),")")),
+           med_fmt = ifelse(str_detect(pattern = "%", statistic),
+                    paste0(round(median*100, 2), "%"), round(median, 2)))
+  temp_a <- temp %>% 
+    filter(location == "Away") %>% 
+    spread(sum_stat, value) %>% 
+     mutate(mean_std =ifelse(str_detect(pattern = "%", statistic),
+                    paste0(round(mean*100, 2), "%"),
+                    paste0(round(mean, 2)," (", round(std, 2),")")),
+            med_fmt = ifelse(str_detect(pattern = "%", statistic),
+                    paste0(round(median*100, 2), "%"), round(median, 2)))
+  temp_o <- temp %>% 
+    filter(location == "All Games") %>% 
+    spread(sum_stat, value) %>% 
+    mutate(mean_std =ifelse(str_detect(pattern = "%", statistic),
+                    paste0(round(mean*100, 2), "%"),
+                    paste0(round(mean, 2)," (", round(std, 2),")")),
+           med_fmt = ifelse(str_detect(pattern = "%", statistic),
+                    paste0(round(median*100, 2), "%"), round(median, 2)))
+  temp_out <- temp_o %>% 
+    left_join(temp_h, by = "statistic", suffix = c("", "_h")) %>% 
+    left_join(temp_a, by = "statistic", suffix = c("", "_a")) %>%
+    select(statistic, contains("n_games"),contains("mean_std"),contains("mean"), contains("std"), contains("med"), contains("min"), contains("max")) %>% 
+  mutate(order = case_when(statistic == "+/-" ~1,
+                           str_detect(pattern = "PT", statistic) ~ 2,
+                           str_detect(pattern = "3P%", statistic) ~ 3.1,
+                           str_detect(pattern = "3P", statistic) ~ 3,
+                           str_detect(pattern = "FG%", statistic) ~ 4.1,
+                           str_detect(pattern = "FG", statistic) ~ 4,
+                           str_detect(pattern = "FT%", statistic) ~ 5.1,
+                           str_detect(pattern = "FT", statistic) ~ 5,
+                           statistic == "AST" ~6,
+                           statistic == "ORB" ~ 7,
+                           statistic == "TOV" ~7.1,
+                           statistic == "BLK" ~8,
+                           statistic == "STL" ~9,
+                           TRUE  ~ 10)) %>%
+  arrange(order, statistic) %>%
+  mutate(mean_std_h =cell_spec(mean_std_h, format = "html", color = ifelse(mean_h < mean, "red", "green")),
+         mean_std_a =cell_spec(mean_std_a, format = "html",
+                               color = ifelse(mean_a < mean | (statistic == "TOV" & mean_h >= mean),
+                                                                 "red", "green")),
+         statistic = cell_spec(statistic, format = "html",bold = T),
+         med_fmt_h =cell_spec(med_fmt_h, format = "html", color =
+                            ifelse(median_h < median |(statistic == "TOV" & median_h >= median),
+                                                                 "red", "green")),
+         med_fmt_a =cell_spec(med_fmt_a, format = "html", color =
+                            ifelse(median_a < median|(statistic == "TOV" & median_a >= median),
+                                                                 "red", "green")),
+         mean_std = cell_spec(mean_std, italic = T),
+         med_fmt = cell_spec(med_fmt,italic = T)) %>%
+  select(-mean, -mean_h, -mean_a, -contains("median"),-contains("min"),-contains("max"),-order,-starts_with("std"))
+  n_stats_better <- temp_o %>% 
+    left_join(temp_h, by = "statistic", suffix = c("", "_h")) %>% 
+    left_join(temp_a, by = "statistic", suffix = c("", "_a")) %>%
+    select(-contains("std"), -contains("fmt"),-contains("min"),-contains("max"),-contains("games"),
+           -contains("loc")) %>% 
+    mutate(mean_better_a = case_when(statistic == "TOV" ~ ifelse(mean_a < mean, 1, 0),
+                                     mean_a > mean ~ 1,
+                                     T ~ 0),
+           mean_better_h = case_when(statistic == "TOV" ~ ifelse(mean_h < mean, 1, 0),
+                                     mean_h > mean ~ 1,
+                                     T ~ 0),
+           med_better_a = case_when(statistic == "TOV" ~ ifelse(median_a < median, 1, 0),
+                                     median_a > median ~ 1,
+                                     T ~ 0),
+           med_better_h = case_when(statistic == "TOV" ~ ifelse(median_h < median, 1, 0),
+                                     median_h > median ~ 1,
+                                     T ~ 0)) %>% 
+    select(contains("better"),statistic) %>% 
+    summarise(mean_std_a = as.character(sum(mean_better_a)),
+              mean_std_h = as.character(sum(mean_better_h)),
+              med_fmt_a = as.character(sum(med_better_a)),
+              med_fmt_h = as.character(sum(med_better_h))) %>% 
+    mutate(statistic = "<b>Number Stats Better</b>")
+
+temp_out2 <- temp_out %>% 
+  bind_rows(n_stats_better)
+return(temp_out2)
+}
+
+format_kbl <- function(df, team){
+  tbl <- kable(df, format = "html",align = "c", escape = F,
+      col.names = c("Metric", rep(c("Overall", "Home", "Away"), 3))) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover")) %>% 
+  add_header_above(header = c("", "Number of Games" = 3, "Mean (SD)/Percentage" = 3, "Median" = 3)) %>% 
+  pack_rows(group_label = "Plus-Minus", start_row = 1, 1) %>% 
+  pack_rows(group_label = "Scoring", start_row = 2, 11) %>% 
+  pack_rows(group_label = "Other Offense", start_row = 12, 14) %>% 
+  pack_rows(group_label = "Defense", start_row = 15, 18) %>% 
+  pack_rows(group_label = "Overall Performance", start_row = 19, 19) %>% 
+  scroll_box(width = "700px", height = "500px") 
+  return(tbl)
+}
+i = 1
+format_kbl(format_tm(teams$opp[i]))
+
+```
+
+##### Boston Celtics
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Brooklyn Nets
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Charlotte Hornets
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Chicago Bulls
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Cleveland Cavaliers
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Dallas Mavericks
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Denver Nuggets
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Detroit Pistons
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Houston Rockets
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Indiana Pacers
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Los Angeles Clippers
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Los Angeles Lakers
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Memphis Grizzlies
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Miami Heat
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Milwaukee Bucks
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Minnesota Timberwolves
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### New Orleans Pelicans
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### New York Knicks
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Oklahoma City Thunder
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Orlando Magic
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Philadelphia 76ers
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Phoenix Suns
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Portland Trailblazers
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Sacramento Kings
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### San Antonio Spurs
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Toronto Raptors
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Utah Jazz
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+##### Washington Wizards
+```{r,message=F, echo=F,warning=FALSE}
+opts <- options(knitr.kable.NA = "")
+i = i + 1
+format_kbl(format_tm(teams$opp[i]))
+```
+
+### Statistical Comparisons # {.tabset}
+#### Team  vs. All Games # {.tabset}
+##### Points Per Game
+```{r,message=F, echo=F,warning=FALSE}
+run_test <- function(stat, alpha,stat_label, loc){
+  stat_data <- all_data %>% 
+    filter(statistic == stat, location %in% loc)
+  out_data <- tibble()
+  for (i in 1:29){
+    team_data <- stat_data %>% 
+      filter(opp == teams$opp[i])
+    rest_data <- stat_data %>% 
+      filter(opp != teams$opp[i])
+    team_summary <- team_data %>% 
+      mutate(avg_stat = mean(value),
+             med_stat = median(value)) %>% 
+      distinct(avg_stat,med_stat)
+    all_summary <- rest_data %>% 
+      mutate( avg_stat = mean(value),
+             med_stat = median(value)) %>% 
+      distinct(avg_stat,med_stat)
+    results <- tidy(wilcox.test(team_data$value,rest_data$value)) %>% 
+      mutate(opp = teams$opp[i]) %>% 
+      select(-method, -alternative) %>% 
+      bind_cols(all_summary) %>% 
+      bind_cols(team_summary) %>% 
+      rename(avg_stat_tm = avg_stat1,
+             med_stat_tm = med_stat1) %>% 
+      select(opp,statistic, p.value, starts_with("avg"), starts_with("med"))
+    out_data <- out_data %>% 
+      bind_rows(results)
+  }
+  out_data2 <- out_data %>% 
+    mutate(sig = ifelse(p.value < alpha, "*", "")) %>% 
+    arrange(desc(sig)) 
+  red_rows <- which((out_data2$med_stat_tm < out_data2$med_stat) & out_data2$sig =="*")
+  green_rows <- which((out_data2$med_stat_tm >= out_data2$med_stat) & out_data2$sig =="*")
+  out_data_fmt <- kable(out_data2, format = "html",
+                        col.names = c('Team','Test Statistic', 'P-Value','Mean - All', 'Mean - Team',
+                                      'Median - All', 'Median - Team',""), align = 'c',digits = 2,
+                        label = stat_label) %>% 
+    kable_styling(bootstrap_options = c("striped", "hover")) %>% 
+    row_spec(red_rows, color = "red") %>% 
+    row_spec(green_rows, color = "green") %>% 
+    add_footnote(label = c("* indicates significance at the 95% confidence level.","Green indicates relative worse performance against the team, and red indicates relative better performance."),notation = "number")
+  return(out_data_fmt)
+}
+run_test("PTS", 0.05, stat_label = "Points Per Game", loc =c("Home", "Away")) 
+```
+
+##### Plus/Minus
+```{r,message=F, echo=F,warning=FALSE}
+run_test("+/-", 0.05, stat_label = "Plus/Minus",loc =c("Home", "Away"))
+```
+
+##### FG%
+```{r,message=F, echo=F,warning=FALSE}
+run_test("FG%", 0.05, stat_label = "Field Goal Percentage",loc =c("Home", "Away"))
+```
+
+##### 3P%
+```{r,message=F, echo=F,warning=FALSE}
+run_test("3P%", 0.05, stat_label = "Three Point Percentage",loc =c("Home", "Away"))
+```
+
+##### FT%
+```{r,message=F, echo=F,warning=FALSE}
+run_test("FT%", 0.05, stat_label = "Free Throw Percentage",loc =c("Home", "Away"))
+```
+
+#### Team Away vs. All Away # {.tabset}
+##### Points Per Game
+```{r,message=F, echo=F,warning=FALSE}
+run_test("PTS", 0.05, stat_label = "Points Per Game", loc =c("Away"))
+```
+
+##### Plus/Minus
+```{r,message=F, echo=F,warning=FALSE}
+run_test("+/-", 0.05, stat_label = "Plus/Minus",loc =c("Away"))
+```
+
+##### FG%
+```{r,message=F, echo=F,warning=FALSE}
+run_test("FG%", 0.05, stat_label = "Field Goal Percentage",loc =c("Away"))
+```
+
+##### 3P%
+```{r,message=F, echo=F,warning=FALSE}
+run_test("3P%", 0.05, stat_label = "Three Point Percentage",loc =c("Away"))
+```
+
+##### FT%
+```{r,message=F, echo=F,warning=FALSE}
+run_test("FT%", 0.05, stat_label = "Free Throw Percentage",loc =c("Away"))
+```
+
+#### Team Home vs. All Home # {.tabset}
+##### Points Per Game
+```{r,message=F, echo=F,warning=FALSE}
+run_test("PTS", 0.05, stat_label = "Points Per Game", loc =c("Home"))
+```
+
+##### Plus/Minus
+```{r,message=F, echo=F,warning=FALSE}
+run_test("+/-", 0.05, stat_label = "Plus/Minus",loc =c("Home"))
+```
+
+##### FG%
+```{r,message=F, echo=F,warning=FALSE}
+run_test("FG%", 0.05, stat_label = "Field Goal Percentage",loc =c("Home"))
+```
+
+##### 3P%
+```{r,message=F, echo=F,warning=FALSE}
+run_test("3P%", 0.05, stat_label = "Three Point Percentage",loc =c("Home"))
+```
+
+##### FT%
+```{r,message=F, echo=F,warning=FALSE}
+run_test("FT%", 0.05, stat_label = "Free Throw Percentage",loc =c("Home"))
+```
+
+## Yearly Growth # {.tabset}
+### Points Scored
+```{r,message=F, echo=F,warning=FALSE}
+plot_data <- function(stat,stat_label){
+  df <- all_data %>% 
+    filter(statistic == stat) %>% 
+    mutate(date = as.Date(date))
+  reg <- lm(data = df, formula = value ~ date)
+  plt <- ggplot(df, mapping = aes(x = date, y = value, color = season)) +
+    geom_point() + 
+    ggtitle(paste0(stat_label, " Over Time")) +
+    xlab("Date") + 
+    ylab(stat_label) +
+    labs(color = "Season") +
+    geom_abline(slope = reg$coefficients[2], intercept = reg$coefficients[1])
+  return(ggplotly(plt))
+}
+plot_data("PTS", "Points Scored")
+
+```
+
+### Plus/Minus
+```{r,message=F, echo=F,warning=FALSE}
+plot_data("+/-", "Plus/Minus")
+```
+
+### FG%
+```{r,message=F, echo=F,warning=FALSE}
+plot_data("FG%", "FG%")
+```
+
+### 3P%
+```{r,message=F, echo=F,warning=FALSE}
+plot_data("3P%", "3P%")
+```
+
+### FT%
+```{r,message=F, echo=F,warning=FALSE}
+plot_data("FT%", "FT%")
+```
+
+## Performance v Game Result # {.tabset}
+### Logistic Regression Model
+```{r,message=F, echo=F,warning=FALSE}
+all_data_wide <- all_data %>% 
+  mutate(result_binary = ifelse(result == "Win",1,0),
+         year = year(date)) %>% 
+  select(result_binary, statistic, value,date, season, location, series, year) %>% 
+  spread(statistic,value)
+
+glm <- glm(data = all_data_wide %>% select(-season,-series,-year,-date,-location), family = binomial(), result_binary ~.)
+df <- tidy(glm) %>% 
+  mutate(or = round(ifelse(str_detect(pattern = "Int", term), NA,exp(estimate)),2),
+         or = ifelse(or < 1, cell_spec(or, format = "html", color = "red"),
+                     cell_spec(or, format = "html", color = "green")),
+         sig = ifelse(p.value < 0.05, "*", "")) %>% 
+  select(-statistic)
+
+kable(df, format = "html", digits = 2,col.names = c("Model Term",
+                                                    "Estimate", "Standard Error","P-Value",
+                                                    "Odds Ratio",""), escape = F,
+      align = "c") %>% 
+kable_styling(bootstrap_options = c("striped", "hover")) 
+```
+
+### Visualizations
+```{r,message=F, echo=F,warning=FALSE}
+plt <- ggplot(data = all_data, mapping = aes(x = result, y = value, fill = result)) +
+  stat_summary(fun="mean", geom="bar") +
+  theme(legend.position = "none") +
+  xlab("Game Result") + 
+  ylab("Statistic Value") +
+  facet_wrap(~statistic)
+ggplotly(plt)
+```
+
