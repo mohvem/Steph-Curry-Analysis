@@ -6,7 +6,7 @@ import numpy
 import pandas as pd
 import string
 
-steph = pd.read_csv('/Users/mohinivembu/Documents/Steph Curry Project/Steph Curry Stats.csv',
+steph = pd.read_csv('Steph Curry Project/Steph Curry Stats.csv',
                     header = 0)
 pd.options.mode.chained_assignment = None
 ### Clean up the Data
