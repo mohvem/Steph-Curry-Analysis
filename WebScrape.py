@@ -233,7 +233,7 @@ names_all[5] = 'Result'
 all_stats.columns = names_all
 all_stats = pd.concat([all_stats,stats_po], axis = 0)
 
-all_stats.to_csv('/Users/mohinivembu/Documents/Steph Curry Project/Steph Curry Stats.csv')
+all_stats.to_csv('Steph Curry Project/Steph Curry Stats.csv')
 
 
 
